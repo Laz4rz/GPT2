@@ -43,7 +43,7 @@ def get_belebele(split="eng_Latn"):
     return ds
 
 
-def render_example(example):
+def render_example(example, enc):
     """
     Given the example as a dictionary, render it as three torch tensors:
     - tokens (the tokens of context + completion, of size 4xN, as there are always 4 candidates)
@@ -65,10 +65,11 @@ def render_example(example):
     tok_rows = []
     mask_rows = []
     for end in endings:
-        if model.__str__().split("(")[0] != "LlamaForCausalLM":
-            end_tokens = enc.encode(" " + end) # note: prepending " " because GPT-2 tokenizer -- may be treated as a sentence start and get a special token
-        else:
-            end_tokens = enc.encode(end)        
+        # if model.__str__().split("(")[0] != "LlamaForCausalLM":
+        #     end_tokens = enc.encode(" " + end) # note: prepending " " because GPT-2 tokenizer -- may be treated as a sentence start and get a special token
+        # else:
+        #     end_tokens = enc.encode(end)   
+        end_tokens = enc.encode(" " + end)     
         tok_rows.append(ctx_tokens + end_tokens)
         mask_rows.append([0]*len(ctx_tokens) + [1]*len(end_tokens))
         data["ending_tokens"].append(end_tokens)
@@ -89,7 +90,7 @@ def iterate_examples(ds):
 
 
 @torch.no_grad()
-def evaluate(model, device, ds, return_acc=False):
+def evaluate(model, tokenizer, device, ds, return_acc=False, no_dot_notation=False):
 
     torch.set_float32_matmul_precision('high') # use tf32
     model.to(device)
@@ -98,12 +99,15 @@ def evaluate(model, device, ds, return_acc=False):
     num_correct = 0
     num_total = 0
     for example in iterate_examples(ds):
-        data, tokens, mask, label = render_example(example)
+        data, tokens, mask, label = render_example(example, tokenizer)
         tokens = tokens.to(device)
         mask = mask.to(device)
 
         # get the logits
-        logits = model(tokens).logits # size: sentences x tokens x vocab
+        if no_dot_notation:
+            logits = model(tokens)[0]
+        else:
+            logits = model(tokens).logits # size: sentences x tokens x vocab
         shift_logits = (logits[..., :-1, :]).contiguous() # size: sentences x (tokens-1) x vocab
         shift_tokens = (tokens[..., 1:]).contiguous()     # size: sentences x (tokens-1)
         flat_shift_logits = shift_logits.view(-1, shift_logits.size(-1)) # size: (sentences*tokens) x vocab
@@ -132,34 +136,35 @@ def evaluate(model, device, ds, return_acc=False):
                 print(f"{i} (loss: {avg_loss[i].item():.4f}) {end}")
             print(f"predicted: {pred_norm}, actual: {label}")
     
-    print("model:", name)
+    # print("model:", name)
     print(f"Final acc_norm: {num_correct_norm}/{num_total}={num_correct_norm/num_total:.4f}")
     
     if return_acc:
         return num_correct_norm/num_total
 
 
-# seeds should not matter here
-seed = 42
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
+if __name__ == "__main__":
+    # seeds should not matter here
+    seed = 42
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
-# name = "meta-llama/Meta-Llama-3-8B"
-name = "openai-community/gpt2"
-tokenizer = AutoTokenizer.from_pretrained(name)
-model = AutoModelForCausalLM.from_pretrained(name)
-enc = tokenizer
+    # name = "meta-llama/Meta-Llama-3-8B"
+    name = "openai-community/gpt2"
+    tokenizer = AutoTokenizer.from_pretrained(name)
+    model = AutoModelForCausalLM.from_pretrained(name)
+    enc = tokenizer
 
-# eval local models
-# 1. my pretrained GPT-2 models are at https://huggingface.co/Laz4rz/GPT-2/tree/main
-# 2. you can download with snapshot_download(repo_id="Laz4rz/GPT-2", allow_patterns="*.pth") (huggingface_hub library)
-# 3. they will be place in the .cache folder, so the path will be something like ~/.cache/huggingface and the follow by what you see in the example path below
-# 4. if you want to use custom model, make sure it returns dot notation accessible logits (model(x).logits, used SimpleNamespace for that)
-# name = "/root/.cache/huggingface/hub/models--Laz4rz--GPT-2/snapshots/7b11ebd22a44a487bda59e6c29d2ae144513a268/model_19000.pth"
-# model = GPT.from_pretrained(name, local=True, return_dict=True)
-# enc = tiktoken.get_encoding("gpt2")
+    # eval local models
+    # 1. my pretrained GPT-2 models are at https://huggingface.co/Laz4rz/GPT-2/tree/main
+    # 2. you can download with snapshot_download(repo_id="Laz4rz/GPT-2", allow_patterns="*.pth") (huggingface_hub library)
+    # 3. they will be place in the .cache folder, so the path will be something like ~/.cache/huggingface and the follow by what you see in the example path below
+    # 4. if you want to use custom model, make sure it returns dot notation accessible logits (model(x).logits, used SimpleNamespace for that)
+    # name = "/root/.cache/huggingface/hub/models--Laz4rz--GPT-2/snapshots/7b11ebd22a44a487bda59e6c29d2ae144513a268/model_19000.pth"
+    # model = GPT.from_pretrained(name, local=True, return_dict=True)
+    # enc = tiktoken.get_encoding("gpt2")
 
-# ds = get_belebele("eng_Latn")
-ds = get_hellaswag("validation")
+    # ds = get_belebele("eng_Latn")
+    ds = get_hellaswag("validation")
 
-evaluate(model, "cuda", ds)
+    evaluate(model, tokenizer, "cuda", ds)

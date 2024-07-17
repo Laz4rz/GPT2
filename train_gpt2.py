@@ -1,4 +1,5 @@
 from gpt2 import GPT, GPTConfig
+from eval import get_belebele, evaluate
 # from scratch import check_dtypes
 
 import os
@@ -45,7 +46,7 @@ class DataLoaderLite:
             self.reset()
         elif inputs == "fineweb":
             assert split in ("train", "val"), "split must be in ['train', 'val']"
-            data_root = "edu_fineweb10B"
+            data_root = "/root/Llama/CPT/wikipedia"
             shards = os.listdir(data_root)
             shards = [shard for shard in shards if split in shard]
             shards = sorted(shards)
@@ -160,8 +161,8 @@ if master_process:
 # create optimizer
 max_lr = 6e-4
 min_lr = max_lr * 0.1
-max_steps = 19703 # 1 epoch on 10B fineweb, and batch 0.5M
-warmup_steps = 715
+max_steps = 2400
+warmup_steps = 50
 def get_lr(step):
     # linear warmup
     if step < warmup_steps:
@@ -195,7 +196,7 @@ if master_process:
     if wandb_logging:
         generations_table = []
         wandb.init(
-            project="gpt2", name=run_dir, 
+            project="gpt2-wiki-pl", name=run_dir, 
             config={
                 "B": B, "T": T, "total_batch_size": total_batch_size, 
                 "grad_accum_steps": grad_accum_steps, "max_lr": max_lr, 
@@ -210,6 +211,10 @@ if master_process:
     if enable_hf:
         from huggingface_hub import HfApi
         api = HfApi()
+
+# validation ds
+if master_process:
+    ds = get_belebele("pol_Latn")
 
 
 # training loop
@@ -244,7 +249,7 @@ for step in range(max_steps):
     if step % eval_resolution == 0 and master_process:
         model.eval()
         # test_sentence = "The meaning of life is"
-        test_sentence = "Hello, I'm a language model,"
+        test_sentence = "Cześć, jestem modelem językowym, "
         num_return_sequences = 4
         max_length = 32
         sample_rng = torch.Generator(device=device)
@@ -265,9 +270,24 @@ for step in range(max_steps):
                 columns=["generation_1", "generation_2", "generation_3", "generation_4"], 
                 data=generations_table)
             wandb.log({"generations": eval_generations_table})
+
+    if step % eval_resolution == 0 and master_process:
+        model.eval()
+        with torch.no_grad():
+            acc = evaluate(
+                model, 
+                tiktoken.get_encoding("gpt2"),
+                "cuda:0",
+                ds,
+                return_acc=True,
+                no_dot_notation=True
+            )
+        wandb.log({"belebele": acc})
+
         
 
     # training
+    model.train()
     start = datetime.now()
     start_rank = datetime.now()
     optimizer.zero_grad()
@@ -318,7 +338,7 @@ for step in range(max_steps):
         log_string = f"{step}, {loss_accum:.4f}, {norm:.4f}, {lr:.4e}, {batch_time}, {tokens_per_sec:.2f}, {batch_time_per_rank}"
         print(f"Step: {step}, Loss: {loss_accum:.6f}, Norm: {norm:.4f}, lr: {lr:.4e}, Batch time: {batch_time}, Tokens/sec: {tokens_per_sec:.2f}")
         [print(f"   Rank {i}: {batch_time:.4f}") for i, batch_time in enumerate(batch_time_per_rank)]
-        if (step % eval_resolution == 0 or last_step) or step == 0:
+        if (step % eval_resolution == 0 or last_step) and step != 0:
             model_path = os.path.join(run_model_dir, f"model_{step}.pth")
             torch.save(raw_model.state_dict(), model_path)
             print(f"Model saved at step {step}!")
@@ -326,7 +346,7 @@ for step in range(max_steps):
                 api.upload_file(
                     path_or_fileobj=model_path,
                     path_in_repo=f"model_{step}.pth",
-                    repo_id="laz4rz/GPT-2",
+                    repo_id="laz4rz/GPT-2-wiki-pl",
                     repo_type="model",
                 )
         with open(train_file, "a") as file:
