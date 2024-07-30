@@ -21,13 +21,16 @@ local_dir = "c4"
 shard_size = int(1e8)
 training_tokens_to_shard = 1_100_000_000
 training_file_limit = training_tokens_to_shard // shard_size
+approx_char_token = 2
 
 # create the cache the local directory if it doesn't exist yet
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)
 os.makedirs(DATA_CACHE_DIR, exist_ok=True)
 
 # load c4 from disk with ~= expected number of tokens
-fw = load_dataset(dataset_name, split="train")
+files = os.walk("c4/multilingual")[0][2]
+approx_tokens = 0
+
 
 # init the tokenizer
 enc = tiktoken.get_encoding("gpt2")
