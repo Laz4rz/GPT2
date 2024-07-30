@@ -26,3 +26,14 @@ def check_dtypes(device):
             print(f"Dtype {dtype} not supported on device {device}: {e}")
 
     return available_dtypes
+
+# count tokens in shards
+dir_path = "wikipedia"
+files = list(os.walk(dir_path))[0][2]
+files = [f for f in files if "train" in f]
+
+
+acc = 0
+for f in files:
+    acc += len(np.load(os.path.join(dir_path, f)))
+print(acc)
