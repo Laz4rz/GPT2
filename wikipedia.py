@@ -16,7 +16,9 @@ from tqdm import tqdm # pip install tqdm
 # ------------------------------------------
 dataset_name = "chrisociepa/wikipedia-pl-20230401"
 local_dir = "wikipedia"
-shard_size = int(1e8) # 100M tokens per shard, total of 100 shards
+shard_size = int(1e8)
+training_tokens_to_shard = 1_100_000_000
+training_file_limit = training_tokens_to_shard // shard_size
 
 # create the cache the local directory if it doesn't exist yet
 DATA_CACHE_DIR = os.path.join(os.path.dirname(__file__), local_dir)
@@ -44,6 +46,7 @@ def write_datafile(filename, tokens_np):
 # tokenize all documents and write output shards, each of shard_size tokens (last shard has remainder)
 total_tokens_training = 0
 total_tokens_validation = 0
+training_file_count = 0
 nprocs = max(1, os.cpu_count()//2)
 with mp.Pool(nprocs) as pool:
     shard_index = 0
@@ -72,6 +75,7 @@ with mp.Pool(nprocs) as pool:
             all_tokens_np[token_count:token_count+remainder] = tokens[:remainder]
             write_datafile(filename, all_tokens_np)
             shard_index += 1
+            progress_bar.close()
             progress_bar = None
             # populate the next shard with the leftovers of the current doc
             all_tokens_np[0:len(tokens)-remainder] = tokens[remainder:]
@@ -81,9 +85,12 @@ with mp.Pool(nprocs) as pool:
                 total_tokens_validation += len(all_tokens_np)
             else:
                 total_tokens_training += len(all_tokens_np)
+                training_file_count += 1
+                if training_file_count == training_file_limit:
+                    break
 
     # write any remaining tokens as the last shard
-    if token_count != 0:
+    if token_count != 0 and training_file_count < training_file_limit:
         split = "val" if shard_index == 0 else "train"
         filename = os.path.join(DATA_CACHE_DIR, f"wikipedia_{split}_{shard_index:06d}")
         write_datafile(filename, all_tokens_np[:token_count])
@@ -92,7 +99,6 @@ with mp.Pool(nprocs) as pool:
         else:
             total_tokens_training += len(all_tokens_np[:token_count])
     
-progress_bar.close()
 print("Done sharding!")
 print("Training tokens:", total_tokens_training)
 print("Validation tokens:", total_tokens_validation)
