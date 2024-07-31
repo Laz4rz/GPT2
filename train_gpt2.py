@@ -48,6 +48,7 @@ class DataLoaderLite:
             assert split in ("train", "val"), "split must be in ['train', 'val']"
             data_root = "/root/Llama/CPT/wikipedia"
             shards = os.listdir(data_root)
+            shards = [shard for shard in shards if ".npy" in shard]
             shards = [shard for shard in shards if split in shard]
             shards = sorted(shards)
             shards = [os.path.join(data_root, shard) for shard in shards]

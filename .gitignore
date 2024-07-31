@@ -1,6 +1,8 @@
 models/*
 hellaswag/*
 edu_fineweb10B/*
+c4/*
+wikipedia/*
 wandb/*
 *.pyc
 # logs/*
